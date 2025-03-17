@@ -146,7 +146,7 @@ function love.load()
         width = 64, -- width of player
         height = 64, -- height of player
         speed = 400, -- movement speed
-        fireRate = .1, -- time between shots
+        fireRate = .3, -- time between shots
         firePushback = 5, -- how much the player is pushed back when firing
         fx = 0, -- force x
         fy = 0, -- force y
@@ -161,7 +161,7 @@ function love.load()
             rotation = 0,
             duration = 0
         },
-        debugMode = true, -- draw hitbox for debugging
+        debugMode = false, -- draw hitbox for debugging
         damage = 10, -- damage dealt by player
         gunShake = {
             x = 0,
@@ -228,6 +228,7 @@ function love.load()
                         enemy:applyForce(self.radians, love.math.random(150, 200)) -- Apply force to the enemy
                         enemy.health = enemy.health - self.damage
                         enemy.hit = true
+                        enemy.hitTime = enemy.hitDuration
 
                         if enemy.health <= 0 then
                             table.remove(enemies, i)
@@ -513,7 +514,7 @@ function love.update(dt)
         updateEnemies(dt)
 
         -- spawn enemies randomly
-        if math.random() < 0.01 then
+        if math.random() < 0.001 then
             local spawnRadius = 600  -- Spawn off-screen
             local angle = math.random() * 2 * math.pi
             local x = player.worldX + math.cos(angle) * spawnRadius
@@ -590,6 +591,12 @@ function love.mousereleased(x, y, button)
                 obj.hot = false
             end
         end
+    end
+end
+
+function love.keypressed(key)
+    if key == "b" then
+        player.debugMode = not player.debugMode  -- Toggle debug mode
     end
 end
 

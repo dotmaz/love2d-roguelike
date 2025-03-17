@@ -5,17 +5,18 @@ function Enemy:new(x, y, targetPlayer)
     local self = setmetatable({}, Enemy)
     self.x = x -- World x position of enemy
     self.y = y -- World y position of enemy
-    self.health = 25
+    self.health = 50
     self.hit = false -- hit state
     self.hitDuration = 0.08 -- hit duration
-    self.hitTime = 0
+    self.hitTime = self.hitDuration
     self.targetPlayer = targetPlayer -- target player to follow
-    self.width = 64 -- width of player
-    self.height = 64 -- height of player
+    self.targetRange = 900 -- range to follow player
+    self.width = 128 -- width of player
+    self.height = 128 -- height of player
     self.fx = 0 -- force x
     self.fy = 0 -- force y
-    self.speed = 80 -- movement speed,
-    self.animation = SpriteAnimation:new("sprites/enemy.png", 32, 32, {
+    self.speed = 160 -- movement speed,
+    self.animation = SpriteAnimation:new("sprites/enemy.png", 32, 32, 2, 2, {
         move = {1, 9, 0.1}, -- row 1, 9 frames, 100ms per frame
         idle = {2, 11, 0.1} -- row 2, 11 frames, 100ms per frame
     })
@@ -37,9 +38,11 @@ function Enemy:draw()
 
 
     -- draw hitbox
-    love.graphics.setColor(1, 0, 0, 0.5)
-    love.graphics.rectangle("line", self.x, self.y, self.width, self.height)
-    love.graphics.setColor(1, 1, 1, 1)
+    if player.debugMode then
+        love.graphics.setColor(1, 0, 0, 0.5)
+        love.graphics.rectangle("line", self.x, self.y, self.width, self.height)
+        love.graphics.setColor(1, 1, 1, 1)
+    end
 end
 
 function Enemy:update(dt)
@@ -62,7 +65,7 @@ function Enemy:update(dt)
     end
 
     -- If within range, move towards player, otherwise idle
-    if(length < 300) then
+    if(length < self.targetRange) then
         self.animation:setState("move")
         self.x = self.x + dx * self.speed * dt
         self.y = self.y + dy * self.speed * dt

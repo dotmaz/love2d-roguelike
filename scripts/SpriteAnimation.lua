@@ -1,11 +1,13 @@
 SpriteAnimation = {}
 SpriteAnimation.__index = SpriteAnimation
 
-function SpriteAnimation:new(imagePath, frameWidth, frameHeight, animations)
+function SpriteAnimation:new(imagePath, frameWidth, frameHeight, scaleX, scaleY, animations)
     local self = setmetatable({}, SpriteAnimation)
     self.image = love.graphics.newImage(imagePath)
     self.frameWidth = frameWidth
     self.frameHeight = frameHeight
+    self.scaleX = scaleX or 1
+    self.scaleY = scaleY or 1
     self.animations = animations -- {state = {row, frames, speed}}
     self.currentState = "idle"
     self.currentFrame = 1
@@ -49,7 +51,7 @@ end
 
 function SpriteAnimation:draw(x, y)
     self.image:setFilter("nearest", "nearest")
-    love.graphics.draw(self.image, self.quads[self.currentState][self.currentFrame], x, y, 0, 2, 2)
+    love.graphics.draw(self.image, self.quads[self.currentState][self.currentFrame], x, y, 0, 2 * self.scaleX, 2 * self.scaleY)
 end
 
 return SpriteAnimation
