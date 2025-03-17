@@ -16,6 +16,8 @@ local bullets = {} -- Track all bullets
 local uiobjects = {} -- Track all UI objects
 local playerID = nil -- This client's ID
 
+local globalAnimations = {} -- Track all global animations
+
 
 local ghostShots = {}
 
@@ -146,7 +148,7 @@ function love.load()
         width = 64, -- width of player
         height = 64, -- height of player
         speed = 400, -- movement speed
-        fireRate = .3, -- time between shots
+        fireRate = .1, -- time between shots
         firePushback = 5, -- how much the player is pushed back when firing
         fx = 0, -- force x
         fy = 0, -- force y
@@ -175,10 +177,11 @@ function love.load()
         isMoving = false, -- is the player moving?
         particleSystem = nil,  -- particle system for muzzle shot
         fireTime = 0, -- time since last fire
-        autoaim = false, -- autoaim towards nearest enemy
+        autoaim = true, -- autoaim towards nearest enemy
         fire = function(self)
             -- Play sound
             local s = sounds.shot:clone()
+            s:setVolume(0.3)
             -- s:seek(0.1) -- heavy pistol / medium smg
             s:seek(0.15) -- light smg / medium pistol
             s:play()
@@ -235,6 +238,7 @@ function love.load()
 
                             -- play sounds
                             local s = sounds.slimeHit:clone()
+                            s:setVolume(0.15)
                             s:seek(0.1)
                             s:play()  
                             local ss = sounds.multHit:clone()
@@ -243,10 +247,16 @@ function love.load()
                             -- shake camera
                             shakeCamera(5, 100)
 
+                            -- add smoke animation
+                            table.insert(globalAnimations, SpriteAnimation:new("sprites/smoke.png", 32, 32, 2, 2, true, enemy.x, enemy.y, {
+                                idle = {1, 8, 0.1}
+                            }))
+
                             break
                         else
                             -- play sounds
                             local s = sounds.slimeHit:clone()
+                            s:setVolume(0.15)
                             s:seek(0.1)
                             s:play() 
                             
@@ -475,7 +485,7 @@ function love.load()
     }
 
     if game.sound_enabled then
-        love.audio.setVolume(0.2)
+        love.audio.setVolume(0.5)
     else
         love.audio.setVolume(0)
     end
@@ -514,12 +524,23 @@ function love.update(dt)
         updateEnemies(dt)
 
         -- spawn enemies randomly
-        if math.random() < 0.001 then
+        if math.random() < 0.01 then
             local spawnRadius = 600  -- Spawn off-screen
             local angle = math.random() * 2 * math.pi
             local x = player.worldX + math.cos(angle) * spawnRadius
             local y = player.worldY + math.sin(angle) * spawnRadius
             spawnEnemy(x, y, player)
+            table.insert(globalAnimations, SpriteAnimation:new("sprites/smoke.png", 32, 32, 2, 2, true, x, y, {
+                idle = {1, 8, 0.07}
+            }))
+        end
+
+        -- update global animations
+        for i, anim in ipairs(globalAnimations) do
+            anim:update(dt)
+            if anim.state == "destroyed" then
+                table.remove(globalAnimations, i)
+            end
         end
     
         -- Process network events
@@ -544,7 +565,6 @@ end
 
 -- DRAW 
 function love.draw()
-
     -- set default attributes
     love.mouse.setCursor()
 
@@ -666,7 +686,16 @@ function drawGameScene()
             love.graphics.draw(sprites.player, p.worldX, p.worldY, p.radians - math.pi / 2 , 2, 2, sprites.player:getWidth()/2, sprites.player:getHeight()/2)
         end
     end
-    
+    love.graphics.setColor(1, 1, 1, 1)
+
+
+    -- draw global animations
+    love.graphics.setColor(1, 1, 1, .7)
+    for _, anim in ipairs(globalAnimations) do
+        anim:draw(0, 0)
+    end
+    love.graphics.setColor(1, 1, 1, 1)
+   
     -- Draw player (fixed at screen center, translated back)
     love.graphics.push()
     love.graphics.translate(camera.x - camera.shakeX, camera.y - camera.shakeY)  -- Undo camera for player

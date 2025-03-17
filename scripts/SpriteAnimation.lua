@@ -1,18 +1,21 @@
 SpriteAnimation = {}
 SpriteAnimation.__index = SpriteAnimation
 
-function SpriteAnimation:new(imagePath, frameWidth, frameHeight, scaleX, scaleY, animations)
+function SpriteAnimation:new(imagePath, frameWidth, frameHeight, scaleX, scaleY, destroyOnFinish, xPos, yPos, animations)
     local self = setmetatable({}, SpriteAnimation)
     self.image = love.graphics.newImage(imagePath)
     self.frameWidth = frameWidth
     self.frameHeight = frameHeight
     self.scaleX = scaleX or 1
     self.scaleY = scaleY or 1
+    self.xPos = xPos or 0
+    self.yPos = yPos or 0
     self.animations = animations -- {state = {row, frames, speed}}
     self.currentState = "idle"
     self.currentFrame = 1
     self.timer = 0
     self.quads = {}
+    self.destroyOnFinish = destroyOnFinish or false
     
     -- Generate quads for each animation
     for state, anim in pairs(animations) do
@@ -50,8 +53,13 @@ function SpriteAnimation:update(dt)
 end
 
 function SpriteAnimation:draw(x, y)
+    x = x + self.xPos
+    y = y + self.yPos
     self.image:setFilter("nearest", "nearest")
     love.graphics.draw(self.image, self.quads[self.currentState][self.currentFrame], x, y, 0, 2 * self.scaleX, 2 * self.scaleY)
+    if self.destroyOnFinish and self.currentFrame == #self.quads[self.currentState] then
+        self.state = "destroyed"
+    end
 end
 
 return SpriteAnimation

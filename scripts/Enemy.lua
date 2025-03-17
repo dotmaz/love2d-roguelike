@@ -16,7 +16,7 @@ function Enemy:new(x, y, targetPlayer)
     self.fx = 0 -- force x
     self.fy = 0 -- force y
     self.speed = 160 -- movement speed,
-    self.animation = SpriteAnimation:new("sprites/enemy.png", 32, 32, 2, 2, {
+    self.animation = SpriteAnimation:new("sprites/enemy.png", 32, 32, 2, 2, false, 0, 0, {
         move = {1, 9, 0.1}, -- row 1, 9 frames, 100ms per frame
         idle = {2, 11, 0.1} -- row 2, 11 frames, 100ms per frame
     })
