@@ -1,53 +1,43 @@
 local UIButton = {}
 UIButton.__index = UIButton
 
+
 function UIButton:new(args)
     args = args or {}
     return setmetatable({
-        x = args.x or 0,
-        y = args.y or 0,
-        width = args.width or 100,
-        height = args.height or 100,
-        text = args.text or nil,
-        color = args.color or {1, 1, 1},
-        hoverColor = args.hoverColor or {0.8, 0.8, 0.8},
         callback = args.callback or function() end,
-        transitionSpeed = args.transitionSpeed or 4,
-        transitionScale = args.transitionScale or 0,
+        scale = 2,
+        width = 120,
+        height = 46,
+        x = args.x or love.graphics.getWidth()/2 - self.width/2,
+        y = args.y or love.graphics.getHeight()/2 - self.height/2,
         hot = false,
-        transition = 0,
+        hover = false,
+        image = love.graphics.newImage(args.image),
+        cool = true,
         draw = function(self)
             -- detect hover overlap
             local mouseX, mouseY = love.mouse.getPosition()
             if mouseX > self.x and mouseX < self.x + self.width and
                mouseY > self.y and mouseY < self.y + self.height then
-                love.graphics.setColor(self.hoverColor)
-
+                self.hover = true
                 cursor = love.mouse.getSystemCursor("hand")
                 love.mouse.setCursor(cursor)
             else
-                love.graphics.setColor(self.color)
+                self.hover = false
+                love.mouse.setCursor()
             end
 
-            -- transition size on hover
+            -- pick the right frame based on button state {0-normal, 64-hover, 128-clicked}
+            local index = 0
             if self.hot then
-                if(self.transition < 1) then
-                    self.transition = self.transition + (self.transitionSpeed / 10)
-                end
-            else
-                if(self.transition > 0) then
-                    self.transition = self.transition - (self.transitionSpeed / 10)
-                end
+                index = 120
+            elseif self.hover then
+                index = 60
             end
-
-            -- draw button
-            love.graphics.rectangle("fill", self.x + 5*self.transitionScale*self.transition, self.y + 5*self.transitionScale*self.transition, self.width - 10*self.transitionScale*self.transition, self.height - 10*self.transitionScale*self.transition, 9)
-
-            -- draw button text
-            if self.text ~= nil then
-                love.graphics.setColor(.2, .2, .2)
-                love.graphics.printf(self.text, self.x, self.y, self.width, "center")
-            end
+            self.image:setFilter("nearest", "nearest")
+            firstFrame = love.graphics.newQuad(index, 0, 60, 23, self.image:getDimensions())
+            love.graphics.draw(self.image, firstFrame, self.x, self.y, 0, self.scale, self.scale)
         end
     }, UIButton)
 end

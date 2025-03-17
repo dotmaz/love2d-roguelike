@@ -68,11 +68,9 @@ end
 
 function initializeUIButtons()
     table.insert(uiobjects, UIButton:new({
-        x = love.graphics.getWidth() / 2 - 100,
-        y = love.graphics.getHeight() / 2 - 50,
-        width = 200,
-        height = 45,
-        text = "Start",
+        x = love.graphics.getWidth() / 2 - 32,
+        y = love.graphics.getHeight() / 2 - 32,
+        image = "sprites/buy-button.png",
         callback = function()
             changeScene("game")
         end
@@ -122,6 +120,7 @@ function love.load()
         slimeHit = love.audio.newSource("custom-sounds/slime-hit.ogg", "static"),
         multHit = love.audio.newSource("sounds/multhit2.ogg", "static"),
         click = love.audio.newSource("sounds/generic1.ogg", "static"),
+        money = love.audio.newSource("sounds/coin1.ogg", "static"),
     }
 
     sprites = {
@@ -604,6 +603,10 @@ function love.mousereleased(x, y, button)
             if obj.hot and button == 1 and x > obj.x and x < obj.x + obj.width and
             y > obj.y and y < obj.y + obj.height then
                 local s = sounds.click:clone()
+                s:play()
+
+                local s = sounds.money:clone()
+                s:setVolume(0.5)
                 s:play()
                 obj.callback()
             end
