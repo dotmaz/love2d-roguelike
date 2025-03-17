@@ -86,6 +86,12 @@ function love.load()
 
     
     -- Global variables
+    background = {
+        tileSize = 64,  -- Size of each square (matches player size for simplicity)
+        bgColor = {0.2, 0.2, 0.2},  -- Dark gray background (R, G, B from 0-1)
+        gridColor = {0.4, 0.4, 0.4}  -- Light gray grid lines
+    }
+
     colors = {
         blue = Utils.color("#819796", 1)
     }
@@ -142,6 +148,11 @@ function love.load()
         firePushback = 5, -- how much the player is pushed back when firing
         fx = 0, -- force x
         fy = 0, -- force y
+        vx = 0,  -- New: X velocity
+        vy = 0,  -- New: Y velocity
+        speed = 400,  -- Max speed
+        accel = 6000,  -- New: Acceleration (how fast it ramps up)
+        friction = 2000,  -- New: Deceleration (how fast it slows down)
         muzzleFlash = { -- muzzle flash effect properties
             active = false,
             size = 0,
@@ -325,9 +336,36 @@ function love.load()
                 dy = dy / length
             end
 
-            -- Apply speed and delta time
-            self.worldX = self.worldX + dx * self.speed * dt
-            self.worldY = self.worldY + dy * self.speed * dt
+            -- Accelerate velocity toward input direction
+            if length > 0 then
+                self.vx = self.vx + dx * self.accel * dt
+                self.vy = self.vy + dy * self.accel * dt
+            end
+
+            -- Apply friction to decelerate when no input
+            local speed = math.sqrt(self.vx^2 + self.vy^2)
+            if speed > 0 then
+                local frictionForce = self.friction * dt
+                if frictionForce > speed then
+                    self.vx = 0
+                    self.vy = 0
+                else
+                    local angle = math.atan2(self.vy, self.vx)
+                    self.vx = self.vx - math.cos(angle) * frictionForce
+                    self.vy = self.vy - math.sin(angle) * frictionForce
+                end
+            end
+
+            -- Cap velocity at max speed
+            speed = math.sqrt(self.vx^2 + self.vy^2)
+            if speed > self.speed then
+                self.vx = self.vx * self.speed / speed
+                self.vy = self.vy * self.speed / speed
+            end
+
+            -- Update world position with velocity
+            self.worldX = self.worldX + self.vx * dt
+            self.worldY = self.worldY + self.vy * dt
 
 
             
@@ -573,6 +611,25 @@ function drawGameScene()
 
     -- Translate for camera shake
     love.graphics.translate(-camera.x + camera.shakeX, -camera.y + camera.shakeY)
+
+    -- Draw tiled background
+    love.graphics.setColor(background.bgColor)  -- Set background color
+    love.graphics.rectangle("fill", camera.x - camera.shakeX, camera.y - camera.shakeY, love.graphics.getWidth(), love.graphics.getHeight())  -- Fill screen
+
+    love.graphics.setColor(background.gridColor)  -- Set grid color
+    local startX = math.floor(camera.x / background.tileSize) * background.tileSize  -- Align to grid
+    local startY = math.floor(camera.y / background.tileSize) * background.tileSize  -- Align to grid
+    local endX = startX + love.graphics.getWidth() + background.tileSize
+    local endY = startY + love.graphics.getHeight() + background.tileSize
+
+    -- Draw vertical lines
+    for x = startX, endX, background.tileSize do
+        love.graphics.line(x, startY, x, endY)
+    end
+    -- Draw horizontal lines
+    for y = startY, endY, background.tileSize do
+        love.graphics.line(startX, y, endX, y)
+    end
 
     -- draw enemies
     drawEnemies()
