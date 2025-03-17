@@ -17,6 +17,8 @@ local uiobjects = {} -- Track all UI objects
 local playerID = nil -- This client's ID
 
 
+local ghostShots = {}
+
 --============  Manager helper functions that should be moved to management classes  ============--
 
 -- Enemy manager functions
@@ -80,7 +82,7 @@ end
 
 -- LOAD
 function love.load()
-    love.window.setMode(1200, 800, {resizable = false})
+    love.window.setMode(2800, 1300, {resizable = false})
     love.window.setTitle("Mazatro")
     initializeUIButtons()
 
@@ -159,7 +161,7 @@ function love.load()
             rotation = 0,
             duration = 0
         },
-        debugMode = false, -- draw hitbox for debugging
+        debugMode = true, -- draw hitbox for debugging
         damage = 10, -- damage dealt by player
         gunShake = {
             x = 0,
@@ -210,24 +212,22 @@ function love.load()
             -- TODO: Add bullet sprite and create echo trajectory that appears & disappears very quickly
 
             local step = 1
-            local distance = 2
-            local maxDistance = 1000
+            local distance = 5
+            local maxDistance = 5000
             local hit = false
             while not hit and step*distance < maxDistance do
-                local x = self.worldX + distance*step*math.cos(self.radians)
-                local y = self.worldY + distance*step*math.sin(self.radians)
+                local x = (self.worldX + self.width/2) + distance*step*math.cos(self.radians)
+                local y = (self.worldY + self.height/2) + distance*step*math.sin(self.radians)
+                -- for debugging purposes, add this x and y as a ghostpoint to ghostShots
+                table.insert(ghostShots, {x = x, y = y})
 
                 -- Check if the shot hits any enemies
                 for i, enemy in ipairs(enemies) do
                     if x > enemy.x and x < enemy.x + enemy.width and y > enemy.y and y < enemy.y + enemy.height then
                         hit = true
+                        enemy:applyForce(self.radians, love.math.random(150, 200)) -- Apply force to the enemy
                         enemy.health = enemy.health - self.damage
-                        if enemy.hitCooldown == 0 then
-                            -- random from 150 to 200
-                            enemy:applyForce(self.radians, love.math.random(150, 200)) -- Apply force to the enemy
-                            enemy.hitCooldown = 0.1
-                            enemy.hit = true
-                        end
+                        enemy.hit = true
 
                         if enemy.health <= 0 then
                             table.remove(enemies, i)
@@ -282,7 +282,7 @@ function love.load()
                 flipX = -1
             end
             love.graphics.draw(sprites.gun, self.x + self.width / 2 + self.gunShake.x + wobbleX, self.y + self.height / 2 + self.gunShake.y + wobbleY, self.radians, 3, 3 * flipX, sprites.gun:getWidth() / 2, sprites.gun:getHeight() / 2)
-
+            
 
 
             -- Draw particle system
@@ -315,6 +315,23 @@ function love.load()
                 -- draw player hitbox
                 love.graphics.setColor(1, 0, 0, 0.5)
                 love.graphics.rectangle("line", self.x, self.y, self.width, self.height)
+
+                -- draw aim line
+                love.graphics.setColor(1, 0, 0, 0.5)  -- Red, semi-transparent
+                local lineLength = math.max(love.graphics.getWidth(), love.graphics.getHeight()) * 2  -- Long enough to cross screen
+                local endX = self.gunTipX + math.cos(self.radians) * lineLength
+                local endY = self.gunTipY + math.sin(self.radians) * lineLength
+                love.graphics.line(self.gunTipX, self.gunTipY, endX, endY)
+
+
+                -- render ghost shots
+                love.graphics.setColor(1, 1, 0, 0.5)  -- Yellow, semi-transparent
+                for _, ghostShot in ipairs(ghostShots) do
+                    local screenX = ghostShot.x - camera.x + camera.shakeX
+                    local screenY = ghostShot.y - camera.y + camera.shakeY
+                    love.graphics.circle("fill", screenX, screenY, 2)
+                end
+
             end
         end,
         update = function(self, dt)
@@ -367,9 +384,6 @@ function love.load()
             self.worldX = self.worldX + self.vx * dt
             self.worldY = self.worldY + self.vy * dt
 
-
-            
-
             -- Update rotation based on mouse position or autoaim
             local centerX = self.x + self.width / 2 -- center x position of player
             local centerY = self.y + self.height / 2 -- center y position of player
@@ -385,8 +399,10 @@ function love.load()
                     end
                 end
                 if nearestEnemy then
-                    local dx = (nearestEnemy.x + nearestEnemy.width) - centerX
-                    local dy = (nearestEnemy.y + nearestEnemy.height) - centerY
+                    local enemyScreenX = nearestEnemy.x - camera.x + camera.shakeX
+                    local enemyScreenY = nearestEnemy.y - camera.y + camera.shakeY
+                    local dx = (enemyScreenX + nearestEnemy.width / 2) - centerX
+                    local dy = (enemyScreenY + nearestEnemy.height / 2) - centerY
                     self.radians = math.atan2(dy, dx)
                 end
             else

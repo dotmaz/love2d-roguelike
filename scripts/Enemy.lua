@@ -5,10 +5,10 @@ function Enemy:new(x, y, targetPlayer)
     local self = setmetatable({}, Enemy)
     self.x = x -- World x position of enemy
     self.y = y -- World y position of enemy
-    self.health = 30
+    self.health = 25
     self.hit = false -- hit state
-    self.hitDuration = 0.05 -- hit duration
-    self.hitCooldown = 0.05 -- hit cooldown
+    self.hitDuration = 0.08 -- hit duration
+    self.hitTime = 0
     self.targetPlayer = targetPlayer -- target player to follow
     self.width = 64 -- width of player
     self.height = 64 -- height of player
@@ -29,11 +29,17 @@ function Enemy:draw()
     self.animation:draw(self.x, self.y)
     if self.hit then
         love.graphics.setBlendMode("add")
-        for i = 1, 30 do
+        for i = 1, 25 do --n't judge me
             self.animation:draw(self.x, self.y)
         end
         love.graphics.setBlendMode("alpha")
     end
+
+
+    -- draw hitbox
+    love.graphics.setColor(1, 0, 0, 0.5)
+    love.graphics.rectangle("line", self.x, self.y, self.width, self.height)
+    love.graphics.setColor(1, 1, 1, 1)
 end
 
 function Enemy:update(dt)
@@ -65,16 +71,12 @@ function Enemy:update(dt)
     end
 
     -- update hit state
+    
     if self.hit then
-        self.hitDuration = self.hitDuration - dt
-        if self.hitDuration <= 0 then
+        self.hitTime = self.hitTime - dt
+        if self.hitTime <= 0 then
             self.hit = false
-            self.hitDuration = 0.2
-        end
-    elseif self.hitCooldown > 0 then
-        self.hitCooldown = self.hitCooldown - dt
-        if self.hitCooldown <= 0 then
-            self.hitCooldown = 0
+            self.hitTime = self.hitDuration
         end
     end
 
