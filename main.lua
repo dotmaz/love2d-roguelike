@@ -51,11 +51,11 @@ end
 
 function updateCameraShake(dt)
     if camera.shakeMag > 0 then
-        camera.x = (math.random() * 2 - 1) * camera.shakeMag
-        camera.y = (math.random() * 2 - 1) * camera.shakeMag
+        camera.shakeX = (math.random() * 2 - 1) * camera.shakeMag
+        camera.shakeY = (math.random() * 2 - 1) * camera.shakeMag
         camera.shakeMag = math.max(camera.shakeMag - camera.shakeDecay * dt, 0)
     else
-        camera.x, camera.y = 0, 0
+        camera.shakeX, camera.shakeY = 0, 0
     end
 end
 
@@ -122,14 +122,18 @@ function love.load()
     camera = {
         x = 0,
         y = 0,
+        shakeX = 0,
+        shakeY = 0,
         shakeMag = 0,
         shakeDecay = 20,
         maxShake = 5
     }
     
     player = {
-        x = love.graphics.getWidth() / 2 - 10, -- x position of player
-        y = love.graphics.getHeight() / 2 - 10, -- y position of player
+        x = love.graphics.getWidth() / 2, -- x position of player
+        y = love.graphics.getHeight() / 2, -- y position of player
+        worldX = 0,
+        worldY = 0,
         radians = 0, -- angle of player
         width = 64, -- width of player
         height = 64, -- height of player
@@ -158,7 +162,7 @@ function love.load()
         isMoving = false, -- is the player moving?
         particleSystem = nil,  -- particle system for muzzle shot
         fireTime = 0, -- time since last fire
-        autoaim = true, -- autoaim towards nearest enemy
+        autoaim = false, -- autoaim towards nearest enemy
         fire = function(self)
             -- Play sound
             local s = sounds.shot:clone()
@@ -199,8 +203,8 @@ function love.load()
             local maxDistance = 1000
             local hit = false
             while not hit and step*distance < maxDistance do
-                local x = self.x + distance*step*math.cos(self.radians)
-                local y = self.y + distance*step*math.sin(self.radians)
+                local x = self.worldX + distance*step*math.cos(self.radians)
+                local y = self.worldY + distance*step*math.sin(self.radians)
 
                 -- Check if the shot hits any enemies
                 for i, enemy in ipairs(enemies) do
@@ -216,12 +220,6 @@ function love.load()
 
                         if enemy.health <= 0 then
                             table.remove(enemies, i)
-
-                            -- particles
-                            if self.particleSystem then
-                                self.particleSystem:setPosition(enemy.x + enemy.width / 2, enemy.y + enemy.height / 2)
-                                self.particleSystem:emit(30)  -- Emit 30 particles on hit
-                            end
 
                             -- play sounds
                             local s = sounds.slimeHit:clone()
@@ -240,11 +238,6 @@ function love.load()
                             s:seek(0.1)
                             s:play() 
                             
-                            -- particles
-                            if self.particleSystem then
-                                self.particleSystem:setPosition(enemy.x + enemy.width / 2, enemy.y + enemy.height / 2)
-                                self.particleSystem:emit(30)  -- Emit 30 particles on hit
-                            end
 
                             break
                         end
@@ -333,8 +326,8 @@ function love.load()
             end
 
             -- Apply speed and delta time
-            self.x = self.x + dx * self.speed * dt
-            self.y = self.y + dy * self.speed * dt
+            self.worldX = self.worldX + dx * self.speed * dt
+            self.worldY = self.worldY + dy * self.speed * dt
 
 
             
@@ -347,7 +340,7 @@ function love.load()
                 local nearestEnemy = nil
                 local nearestDistance = math.huge
                 for _, enemy in ipairs(enemies) do
-                    local distance = math.sqrt((enemy.x - self.x)^2 + (enemy.y - self.y)^2)
+                    local distance = math.sqrt((enemy.x - self.worldX)^2 + (enemy.y - self.worldY)^2)
                     if distance < nearestDistance then
                         nearestDistance = distance
                         nearestEnemy = enemy
@@ -370,11 +363,17 @@ function love.load()
             -- movement from force
             if self.fx ~= 0 or self.fy ~= 0 then
                 -- apply force
-                self.x = self.x + self.fx * dt
-                self.y = self.y + self.fy * dt
+                self.worldX = self.worldX + self.fx * dt
+                self.worldY = self.worldY + self.fy * dt
+                self.fx = self.fx * 0.9
+                self.fy = self.fy * 0.9
                 -- apply friction
-                if math.abs(self.fx) < 0.1 then self.fx = 0 else self.fx = self.fx * 0.9 end
-                if math.abs(self.fy) < 0.1 then self.fy = 0 else self.fy = self.fy * 0.9 end
+                if math.abs(self.fx) < 0.1 then 
+                    self.fx = 0 
+                end
+                if math.abs(self.fy) < 0.1 then 
+                    self.fy = 0 
+                end
             end
 
             -- update gun shake quickly WITHOUT USING DECAY
@@ -445,20 +444,26 @@ function love.update(dt)
         -- Update player position
         player:update(dt)
 
+        -- Update camera position
+        camera.x = player.worldX - love.graphics.getWidth() / 2
+        camera.y = player.worldY - love.graphics.getHeight() / 2
+
         -- Update camera
         updateCameraShake(dt)
 
         -- Send local player position
-        local data = string.format("%f,%f,%.6f", player.x, player.y, player.radians)
+        local data = string.format("%f,%f,%.6f", player.worldX, player.worldY, player.radians)
         server:send(data)
 
         --  Update enemies
         updateEnemies(dt)
 
         -- spawn enemies randomly
-        if math.random() < 0.1 then
-            local x = love.math.random(0, love.graphics.getWidth())
-            local y = love.math.random(0, love.graphics.getHeight())
+        if math.random() < 0.01 then
+            local spawnRadius = 600  -- Spawn off-screen
+            local angle = math.random() * 2 * math.pi
+            local x = player.worldX + math.cos(angle) * spawnRadius
+            local y = player.worldY + math.sin(angle) * spawnRadius
             spawnEnemy(x, y, player)
         end
     
@@ -468,7 +473,7 @@ function love.update(dt)
             if event.type == "receive" then
                 local id, x, y, radians = event.data:match("([^,]+),([%-?%d%.]+),([%-?%d%.]+),([%-?%d%.]+)")
                 if id and x and y and radians then
-                    players[id] = { x = tonumber(x), y = tonumber(y), radians = tonumber(radians) }
+                    players[id] = { worldX = tonumber(x), worldY = tonumber(y), radians = tonumber(radians) }
                 end
             elseif event.type == "connect" then
                 print(event.peer, "connected.")
@@ -567,25 +572,26 @@ function drawGameScene()
     love.graphics.push()
 
     -- Translate for camera shake
-    love.graphics.translate(camera.x, camera.y)
+    love.graphics.translate(-camera.x + camera.shakeX, -camera.y + camera.shakeY)
 
     -- draw enemies
     drawEnemies()
 
     -- Draw other players
-    love.graphics.setColor(1, 0, 0)
+    love.graphics.setColor(.5, 0, 0)
     for id, p in pairs(players) do
         if id ~= playerID then
             love.graphics.setColor(.6, .6, 1) -- blue-shift for other players
             sprites.player:setFilter("nearest", "nearest")
-            love.graphics.draw(sprites.player, p.x, p.y, p.radians - math.pi / 2 , 2, 2, sprites.player:getWidth()/2, sprites.player:getHeight()/2)
+            love.graphics.draw(sprites.player, p.worldX, p.worldY, p.radians - math.pi / 2 , 2, 2, sprites.player:getWidth()/2, sprites.player:getHeight()/2)
         end
     end
-
     
-
-    -- Draw player
+    -- Draw player (fixed at screen center, translated back)
+    love.graphics.push()
+    love.graphics.translate(camera.x - camera.shakeX, camera.y - camera.shakeY)  -- Undo camera for player
     player:draw()
+    love.graphics.pop()
 
     love.graphics.pop()
 end

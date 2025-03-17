@@ -3,12 +3,12 @@ Enemy.__index = Enemy
 
 function Enemy:new(x, y, targetPlayer)
     local self = setmetatable({}, Enemy)
-    self.x = x or love.graphics.getWidth() / 2 -- x position of player
-    self.y = y or love.graphics.getHeight() / 2 - 10 -- y position of player
-    self.health = 10
+    self.x = x -- World x position of enemy
+    self.y = y -- World y position of enemy
+    self.health = 30
     self.hit = false -- hit state
-    self.hitDuration = 0.1 -- hit duration
-    self.hitCooldown = 0 -- hit cooldown
+    self.hitDuration = 0.05 -- hit duration
+    self.hitCooldown = 0.05 -- hit cooldown
     self.targetPlayer = targetPlayer -- target player to follow
     self.width = 64 -- width of player
     self.height = 64 -- height of player
@@ -47,8 +47,8 @@ function Enemy:update(dt)
     end
 
     -- Calculate distance from player
-    local dx = self.targetPlayer.x - self.x
-    local dy = self.targetPlayer.y - self.y
+    local dx = self.targetPlayer.worldX - self.x
+    local dy = self.targetPlayer.worldY - self.y
     local length = math.sqrt(dx^2 + dy^2)
     if length > 0 then
         dx = dx / length
