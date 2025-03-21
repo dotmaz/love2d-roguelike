@@ -1,715 +1,868 @@
+-- Pressed
+-- Author: Mazin Abubeker
+
 --============  Global Setup  ============--
-local enet = require("enet")
-local host = enet.host_create()
-local server = host:connect("73.70.160.188:6789")
 
 -- Custom objects
-local Utils = require("scripts.Utils")
-local SpriteAnimation = require("scripts.SpriteAnimation")
-local UIButton = require("scripts.UIButton")
-local Enemy = require("scripts.Enemy")
+UIButton = require("scripts.UIButton")
+Utils = require("scripts.Utils")
+Animation = require("scripts.Animation")
+ShopItem = require("scripts.ShopItem")
+
+-- Global variables
+sounds = {
+    click = love.audio.newSource("sounds/generic1.ogg", "static"),
+    money = love.audio.newSource("sounds/coin1.ogg", "static"),
+    money2 = love.audio.newSource("sounds/coin2.ogg", "static"),
+    point = love.audio.newSource("sounds/tarot1.ogg", "static"),
+    cancel = love.audio.newSource("sounds/cancel.ogg", "static"),
+    win = love.audio.newSource("sounds/holo1.ogg", "static"),
+    mult = love.audio.newSource("sounds/multhit1.ogg", "static"),
+    mult2 = love.audio.newSource("sounds/multhit2.ogg", "static"),
+    negative = love.audio.newSource("sounds/negative.ogg", "static"),
+    foil = love.audio.newSource("sounds/foil1.ogg", "static"),
+    dice = love.audio.newSource("sounds/other1.ogg", "static"),
+    
+    music = love.audio.newSource("sounds/music1.ogg", "stream")
+}
+
+fonts = {
+    p2plarge = love.graphics.newFont("fonts/PressStart2P-Regular.ttf", 64),
+    p2p = love.graphics.newFont("fonts/PressStart2P-Regular.ttf", 48),
+    p2pmedium = love.graphics.newFont("fonts/PressStart2P-Regular.ttf", 32),
+    p2pmediumsmall = love.graphics.newFont("fonts/PressStart2P-Regular.ttf", 24),
+    p2psmall = love.graphics.newFont("fonts/PressStart2P-Regular.ttf", 16),
+    p2pbutton3 = love.graphics.newFont("fonts/PressStart2P-Regular.ttf", 24)
+}
 
 -- Global states
-local players = {} -- Track all players
-local enemies = {} -- Track all enemies
-local bullets = {} -- Track all bullets
-local uiobjects = {} -- Track all UI objects
-local playerID = nil -- This client's ID
+keys = {} -- table of all pressable keys
 
-local globalAnimations = {} -- Track all global animations
+uikeys = {}
 
+game = {
+    goal = 5,
+    points = 0,
+    roundPoints = 0,
+    startingClicks = 5,
+    clicks = 5,
+    base = 1,
+    money = 0,
+    round = 1
+}
 
-local ghostShots = {}
+shopManager = {
+    sceneTransitionTime = 1,
+    timeElapsed = 0,
+    animation = nil,
+    items = {}
+}
 
---============  Manager helper functions that should be moved to management classes  ============--
+soundManager = {
+    moneySoundTimer = 0,
+    moneySoundCount = 0,
+    moneySoundInterval = 0.1
+}
 
--- Enemy manager functions
+activeModifiers = {} -- table of active modifiers
 
-function spawnEnemy(x, y, player)
-    local enemy = Enemy:new(x, y, player)
-    table.insert(enemies, enemy)
-end
-
-function updateEnemies(dt)
-    for _, enemy in ipairs(enemies) do
-        enemy:update(dt)
-    end
-end
-
-function drawEnemies()
-    for _, enemy in ipairs(enemies) do
-        enemy:draw()
-    end
-end
-
--- Camera management helpers
-
-function shakeCamera(magnitude, shakeDecay)
-    camera.shakeMag = math.min(camera.shakeMag + magnitude, camera.maxShake)
-    if shakeDecay then
-        camera.shakeDecay = shakeDecay
-    else
-        camera.shakeDecay = 20
-    end
-end
-
-function updateCameraShake(dt)
-    if camera.shakeMag > 0 then
-        camera.shakeX = (math.random() * 2 - 1) * camera.shakeMag
-        camera.shakeY = (math.random() * 2 - 1) * camera.shakeMag
-        camera.shakeMag = math.max(camera.shakeMag - camera.shakeDecay * dt, 0)
-    else
-        camera.shakeX, camera.shakeY = 0, 0
-    end
-end
-
-
---============  On-Load Initializers  ============--
-
-function initializeUIButtons()
-    table.insert(uiobjects, UIButton:new({
-        x = love.graphics.getWidth() / 2 - 32,
-        y = love.graphics.getHeight() / 2 - 32,
-        image = "sprites/buy-button.png",
-        callback = function()
-            changeScene("game")
+modifierTimelineManager = {
+    time = 0,
+    interval = 2,
+    active = false,
+    score = 0,
+    count = 0,
+    lastModifier = nil,
+    update = function(self, dt)
+        if not self.active then
+            return
         end
-    }))
-end
+        self.time = self.time + dt
+        if self.time >= self.interval then
+            -- remove first modifier
+            if #activeModifiers > 0 then
+                local modifier = activeModifiers[1]
+                if modifier.type ~= "echo" then
+                    self.lastModifier = modifier
+                end
+                if modifier.type == "mult" then -- IF MODIFIER IS MULT
+                    self.score = self.score * modifier.value
+                    game.roundPoints = self.score
+                    
+                    -- unpress the button and play mult sound
+                    for i, key in ipairs(keys) do
+                        if key.id == modifier.id then
+                            
+                            key.callback(true, self.count)
+                            local multsound = nil;
+                            if self.count > 5 then
+                                multsound = sounds.mult2:clone()
+                            else
+                                multsound = sounds.mult:clone()
+                            end
+                            multsound:setPitch(1 + self.count / 50)
+                            multsound:play()
 
+                            camera:shake(0.2, 5 * self.count + 10)
 
---============  LOVE Hooks - Main Loop  ============--
+                            self.count = self.count + 1
+                            break
+                        end
+                    end
+                elseif modifier.type == "echo" then
+                    -- find last key pressed using self.lastModifier
+                    if self.lastModifier then 
+                        if self.lastModifier.type == "mult" then                                       --
+                            self.score = self.score * self.lastModifier.value                          --
+                            game.roundPoints = self.score                                              -- this is actually horrible
+                            local multsound = nil;                                                     --
+                            if self.count > 5 then                                                     --
+                                multsound = sounds.mult2:clone()                                       --
+                            else                                                                       --
+                                multsound = sounds.mult:clone()
+                            end
+                            multsound:setPitch(1 + self.count / 50)
+                            multsound:play()
+                        elseif self.lastModifier.type == "dice" then 
+                            self.score = self.score + self.lastModifier.value
+                            game.roundPoints = self.score
+                            local dice = sounds.dice:clone()
+                            dice:setVolume(2)
+                            dice:setPitch(1 + self.count / 50)
+                            
+                            dice:play()
+                        end
+                    end
 
--- LOAD
-function love.load()
-    love.window.setMode(2800, 1300, {resizable = false})
-    love.window.setTitle("Mazatro")
-    initializeUIButtons()
+                    for i, key in ipairs(keys) do
+                        if key.id == modifier.id then
+                            
+                            key.callback(true, self.count)
 
-    
-    -- Global variables
-    background = {
-        tileSize = 64,  -- Size of each square (matches player size for simplicity)
-        bgColor = {0.2, 0.2, 0.2},  -- Dark gray background (R, G, B from 0-1)
-        gridColor = {0.4, 0.4, 0.4}  -- Light gray grid lines
-    }
+                            -- play echo sound tarot
+                            local echo = sounds.foil:clone()
+                            echo:setVolume(0.5)
+                            echo:setPitch(1 + self.count / 50)
+                            
+                            echo:play()
 
-    colors = {
-        blue = Utils.color("#819796", 1)
-    }
+                            camera:shake(0.2, 5 * self.count + 10)
 
-    fonts = {
-        poppins = love.graphics.newFont("fonts/Poppins-Medium.ttf", 32)
-    }
-
-    scenes = {
-        menu = drawMenuScene,
-        game = drawGameScene,
-    }
-
-    game = {
-        scene = "menu",
-        sound_enabled = true,
-        music_enabled = false
-    }
-
-    sounds = {
-        menu = love.audio.newSource("sounds/music3.ogg", "stream"),
-        game = love.audio.newSource("sounds/music2.ogg", "stream"),
-        shot = love.audio.newSource("custom-sounds/pistol-shot.ogg", "static"),
-        slimeHit = love.audio.newSource("custom-sounds/slime-hit.ogg", "static"),
-        multHit = love.audio.newSource("sounds/multhit2.ogg", "static"),
-        click = love.audio.newSource("sounds/generic1.ogg", "static"),
-        money = love.audio.newSource("sounds/coin1.ogg", "static"),
-    }
-
-    sprites = {
-        player = love.graphics.newImage("sprites/player.png"),
-        gun = love.graphics.newImage("sprites/gun.png"),
-    }
-
-    camera = {
-        x = 0,
-        y = 0,
-        shakeX = 0,
-        shakeY = 0,
-        shakeMag = 0,
-        shakeDecay = 20,
-        maxShake = 5
-    }
-    
-    player = {
-        x = love.graphics.getWidth() / 2, -- x position of player
-        y = love.graphics.getHeight() / 2, -- y position of player
-        worldX = 0,
-        worldY = 0,
-        radians = 0, -- angle of player
-        width = 64, -- width of player
-        height = 64, -- height of player
-        speed = 400, -- movement speed
-        fireRate = .1, -- time between shots
-        firePushback = 5, -- how much the player is pushed back when firing
-        fx = 0, -- force x
-        fy = 0, -- force y
-        vx = 0,  -- New: X velocity
-        vy = 0,  -- New: Y velocity
-        speed = 400,  -- Max speed
-        accel = 6000,  -- New: Acceleration (how fast it ramps up)
-        friction = 2000,  -- New: Deceleration (how fast it slows down)
-        muzzleFlash = { -- muzzle flash effect properties
-            active = false,
-            size = 0,
-            rotation = 0,
-            duration = 0
-        },
-        debugMode = false, -- draw hitbox for debugging
-        damage = 10, -- damage dealt by player
-        gunShake = {
-            x = 0,
-            y = 0,
-            duration = 0
-        },
-        gunTipX = 0, -- x position of gun tip
-        gunTipY = 0, -- y position of gun tip
-
-        -- properties used by object
-        isMoving = false, -- is the player moving?
-        particleSystem = nil,  -- particle system for muzzle shot
-        fireTime = 0, -- time since last fire
-        autoaim = true, -- autoaim towards nearest enemy
-        fire = function(self)
-            -- Play sound
-            local s = sounds.shot:clone()
-            s:setVolume(0.3)
-            -- s:seek(0.1) -- heavy pistol / medium smg
-            s:seek(0.15) -- light smg / medium pistol
-            s:play()
-
-            -- Camera shake
-            shakeCamera(2)
-
-            -- Character recoil
-            -- local dx = math.cos(self.radians) * self.firePushback
-            -- local dy = math.sin(self.radians) * self.firePushback
-            -- self.fx = -dx*20
-            -- self.fy = -dy*20
-
-            -- gun shake
-            self.gunShake.duration = .1
-
-            -- Generate muzzle flash (random size and rotation)
-            self.muzzleFlash.active = true
-            self.muzzleFlash.size = love.math.random(10, 15)
-            self.muzzleFlash.rotation = love.math.random(0, math.pi * 2)
-            self.muzzleFlash.duration = 0.05
-
-            -- Trigger particle system (emits particles at the muzzle position)
-            if self.particleSystem then
-                self.particleSystem:setPosition(self.gunTipX, self.gunTipY)
-                self.particleSystem:setDirection(self.radians)
-                self.particleSystem:emit(5)  -- Emit 30 particles per shot
-            end
-
-            -- fire instant-hit projectile using a step-based collision detection
-            -- TODO: Add bullet sprite and create echo trajectory that appears & disappears very quickly
-
-            local step = 1
-            local distance = 5
-            local maxDistance = 5000
-            local hit = false
-            while not hit and step*distance < maxDistance do
-                local x = (self.worldX + self.width/2) + distance*step*math.cos(self.radians)
-                local y = (self.worldY + self.height/2) + distance*step*math.sin(self.radians)
-                -- for debugging purposes, add this x and y as a ghostpoint to ghostShots
-                table.insert(ghostShots, {x = x, y = y})
-
-                -- Check if the shot hits any enemies
-                for i, enemy in ipairs(enemies) do
-                    if x > enemy.x and x < enemy.x + enemy.width and y > enemy.y and y < enemy.y + enemy.height then
-                        hit = true
-                        enemy:applyForce(self.radians, love.math.random(150, 200)) -- Apply force to the enemy
-                        enemy.health = enemy.health - self.damage
-                        enemy.hit = true
-                        enemy.hitTime = enemy.hitDuration
-
-                        if enemy.health <= 0 then
-                            table.remove(enemies, i)
-
-                            -- play sounds
-                            local s = sounds.slimeHit:clone()
-                            s:setVolume(0.15)
-                            s:seek(0.1)
-                            s:play()  
-                            local ss = sounds.multHit:clone()
-                            ss:play()
-
-                            -- shake camera
-                            shakeCamera(5, 100)
-
-                            -- add smoke animation
-                            table.insert(globalAnimations, SpriteAnimation:new("sprites/smoke.png", 32, 32, 2, 2, true, enemy.x, enemy.y, {
-                                idle = {1, 8, 0.1}
-                            }))
+                            self.count = self.count + 1
 
                             break
-                        else
-                            -- play sounds
-                            local s = sounds.slimeHit:clone()
-                            s:setVolume(0.15)
-                            s:seek(0.1)
-                            s:play() 
+                        end
+                    end
+                elseif modifier.type == "dice" then
+                    self.score = self.score + modifier.value
+                    game.roundPoints = self.score
+                    for i, key in ipairs(keys) do
+                        if key.id == modifier.id then
                             
+                            key.callback(true, self.count)
+
+                            -- play dice sound
+                            local dice = sounds.dice:clone()
+                            dice:setVolume(2)
+                            dice:setPitch(1 + self.count / 50)
+                            
+                            dice:play()
+
+                            camera:shake(0.2, 5 * self.count + 10)
+
+                            self.count = self.count + 1
 
                             break
                         end
                     end
                 end
-
-                step = step + 1
-            end
-        end,
-        draw = function(self)
-            -- -- calculate walking shuffle
-            local wobbleAmount = 1.5  -- Reduced for subtlety (adjustable)
-            local wobbleSpeed = 25   -- Slower for a natural pace (adjustable)
-            local wobbleX, wobbleY = 0, 0
-            if isMoving then
-                wobbleX = math.sin(love.timer.getTime() * wobbleSpeed) * wobbleAmount
-                wobbleY = math.sin(love.timer.getTime() * wobbleSpeed) * wobbleAmount
-            end
-
-            -- -- Draw player
-            -- love.graphics.setColor(1, 1, 1)
-            -- sprites.player:setFilter("nearest", "nearest")
-            -- love.graphics.draw(sprites.player, self.x + self.width / 2 + wobbleX, self.y + self.height / 2 + wobbleY, self.radians - math.pi / 2, 2, 2, sprites.player:getWidth() / 2, sprites.player:getHeight() / 2)
-
-
-            -- draw gun
-            love.graphics.setColor(1, 1, 1)
-            sprites.gun:setFilter("nearest", "nearest")
-            local flipX = 1
-            if self.radians > math.pi / 2 or self.radians < -math.pi / 2 then
-                flipX = -1
-            end
-            love.graphics.draw(sprites.gun, self.x + self.width / 2 + self.gunShake.x + wobbleX, self.y + self.height / 2 + self.gunShake.y + wobbleY, self.radians, 3, 3 * flipX, sprites.gun:getWidth() / 2, sprites.gun:getHeight() / 2)
-            
-
-
-            -- Draw particle system
-            if self.particleSystem then
-                love.graphics.setColor(1, 1, 1)
-                love.graphics.draw(self.particleSystem)
-            end
-
-            -- Draw muzzle flash if active
-            if self.muzzleFlash.active then
-                love.graphics.setColor(1, 1, 1, .7)
-                love.graphics.push()
-                love.graphics.translate(self.gunTipX, self.gunTipY)
-                love.graphics.rotate(self.muzzleFlash.rotation)
-                love.graphics.rectangle("fill", -self.muzzleFlash.size / 2, -self.muzzleFlash.size / 2, self.muzzleFlash.size, self.muzzleFlash.size)
-                love.graphics.pop()
-
-                -- Reduce the duration of the flash
-                self.muzzleFlash.duration = self.muzzleFlash.duration - love.timer.getDelta()
-                if self.muzzleFlash.duration <= 0 then
-                    self.muzzleFlash.active = false
-                end
-            end
-              
-            if self.debugMode then
-                -- draw gun tip
-                love.graphics.setColor(1, 0, 0, 0.5)
-                love.graphics.circle("fill", self.gunTipX, self.gunTipY, 5)
-
-                -- draw player hitbox
-                love.graphics.setColor(1, 0, 0, 0.5)
-                love.graphics.rectangle("line", self.x, self.y, self.width, self.height)
-
-                -- draw aim line
-                love.graphics.setColor(1, 0, 0, 0.5)  -- Red, semi-transparent
-                local lineLength = math.max(love.graphics.getWidth(), love.graphics.getHeight()) * 2  -- Long enough to cross screen
-                local endX = self.gunTipX + math.cos(self.radians) * lineLength
-                local endY = self.gunTipY + math.sin(self.radians) * lineLength
-                love.graphics.line(self.gunTipX, self.gunTipY, endX, endY)
-
-
-                -- render ghost shots
-                love.graphics.setColor(1, 1, 0, 0.5)  -- Yellow, semi-transparent
-                for _, ghostShot in ipairs(ghostShots) do
-                    local screenX = ghostShot.x - camera.x + camera.shakeX
-                    local screenY = ghostShot.y - camera.y + camera.shakeY
-                    love.graphics.circle("fill", screenX, screenY, 2)
-                end
-
-            end
-        end,
-        update = function(self, dt)
-            local dx, dy = 0, 0
-            if love.keyboard.isDown("w") then dy = -1 end
-            if love.keyboard.isDown("s") then dy = 1 end
-            if love.keyboard.isDown("a") then dx = -1 end
-            if love.keyboard.isDown("d") then dx = 1 end
-            if dy ~= 0 or dx ~= 0 then
-                isMoving = true
             else
-                isMoving = false
-            end
+                game.points = game.points + self.score
+                game.roundPoints = 0
+                self.active = false
 
-            -- Normalize movement vector to ensure constant speed in all directions
-            local length = math.sqrt(dx^2 + dy^2)
-            if length > 0 then
-                dx = dx / length
-                dy = dy / length
-            end
+                -- check if goal is reached
+                if game.points >= game.goal then
+                    roundEnd()
+                    return
+                end
 
-            -- Accelerate velocity toward input direction
-            if length > 0 then
-                self.vx = self.vx + dx * self.accel * dt
-                self.vy = self.vy + dy * self.accel * dt
-            end
+                if game.clicks <= 0 then
+                    inRound = false
+                    inShop = false
+                    isGameOver = true
+                    local s = sounds.cancel:clone()
+                    s:play()
+                    local n = sounds.negative:clone()
+                    n:play()
+                    camera:shake(0.5, 10)
+                    return
+                end
 
-            -- Apply friction to decelerate when no input
-            local speed = math.sqrt(self.vx^2 + self.vy^2)
-            if speed > 0 then
-                local frictionForce = self.friction * dt
-                if frictionForce > speed then
-                    self.vx = 0
-                    self.vy = 0
-                else
-                    local angle = math.atan2(self.vy, self.vx)
-                    self.vx = self.vx - math.cos(angle) * frictionForce
-                    self.vy = self.vy - math.sin(angle) * frictionForce
+                self.count = 0
+            end
+            if self.interval > 0.1 then
+                self.interval = self.interval * 0.95
+            else
+                self.interval = 0.1
+            end
+            self.time = 0
+        end
+    end,
+}
+
+
+-- Add this at the top with your global variables
+camera = {
+    x = 0,
+    y = 0,
+    shakeTimer = 0,
+    shakeDuration = 0,
+    shakeMagnitude = 0
+}
+
+-- Add this function to handle the camera shake
+function camera:shake(duration, magnitude)
+    self.shakeTimer = duration
+    self.shakeDuration = duration
+    self.shakeMagnitude = magnitude
+end
+
+-- Add this to your love.update function
+function camera:update(dt)
+    if self.shakeTimer > 0 then
+        self.shakeTimer = self.shakeTimer - dt
+        
+        -- Calculate shake intensity (fades out over time)
+        local intensity = self.shakeMagnitude * (self.shakeTimer / self.shakeDuration)
+        
+        -- Use LOVE's built-in noise function for smooth random movement
+        local time = love.timer.getTime()
+        self.x = love.math.noise(time * 2, 0) * intensity * 2 - intensity
+        self.y = love.math.noise(0, time * 2) * intensity * 2 - intensity
+        
+        -- Ensure camera returns to center when shake ends
+        if self.shakeTimer <= 0 then
+            self.x = 0
+            self.y = 0
+            self.shakeTimer = 0
+        end
+    end
+end
+
+
+modifierHitTexts = {
+    texts = {},
+    update = function(self, dt)
+        for i, text in ipairs(self.texts) do
+            text.time = text.time + dt
+            text.y = text.y - dt * 20 -- move up
+            if text.time >= .3 then
+                table.remove(self.texts, i)
+            end
+        end
+    end,
+    draw = function(self)
+        for _, text in ipairs(self.texts) do
+            love.graphics.setFont(fonts.p2psmall)
+            if text.count ~= nil then
+                if (text.count > 3 and text.count < 6) then
+                    love.graphics.setFont(fonts.p2pmediumsmall)
+                elseif (text.count >= 6 and text.count < 9) then
+                    love.graphics.setFont(fonts.p2pmedium)
+                elseif (text.count >= 9) then
+                    love.graphics.setFont(fonts.p2p)
                 end
             end
+            love.graphics.setColor(Utils.color("#ffffff"))
+            love.graphics.print(text.text, text.x, text.y)
+            love.graphics.setColor(text.color)--Utils.color("#ff6a3d")
+            
+            love.graphics.print(text.text, text.x + 2, text.y + 2)
+            love.graphics.setFont(fonts.p2p)
+            love.graphics.setColor(1, 1, 1)
+        end
+    end,
+} -- table of text that displays near button when modifier is hit
 
-            -- Cap velocity at max speed
-            speed = math.sqrt(self.vx^2 + self.vy^2)
-            if speed > self.speed then
-                self.vx = self.vx * self.speed / speed
-                self.vy = self.vy * self.speed / speed
+
+--====== HIT ======-
+
+inRound = true
+inShop = false
+
+-- TODO: so many things here obviously 1) factor out reused code 2) fix how objects are addded to the shop make it not bad
+function hit()
+    if #activeModifiers == 0 then
+        -- hit with no modifiers
+        -- increment points
+        game.clicks = game.clicks - 1
+        game.points = game.points + game.base
+    
+        -- play sound
+        local click = sounds.click:clone()
+        click:play()
+
+
+        -- check if goal is reached
+        if game.points >= game.goal then
+            roundEnd()
+            return
+        end
+
+        if game.clicks <= 0 then
+            inRound = false
+            isGameOver = true
+            local s = sounds.cancel:clone()
+            s:play()
+            local n = sounds.negative:clone()
+            n:play()
+            camera:shake(0.5, 10)
+            return
+        end
+    else
+        game.clicks = game.clicks - 1
+        -- play sound
+        local click = sounds.click:clone()
+        click:play()
+        game.roundPoints = game.base
+        modifierTimelineManager.score = game.base
+        modifierTimelineManager.active = true
+        modifierTimelineManager.time = 0
+        modifierTimelineManager.count = 0
+        modifierTimelineManager.interval = 1
+        modifierTimelineManager.lastModifier = nil
+        -- hit_with_modifiers()
+    end
+
+    
+end
+
+function mult(buttonId, toggleState, showHitText, count)
+    -- play sound; if arg is not passed, play sound
+    if playSound == nil then
+        playSound = true
+    end
+    if playSound then
+        local click = sounds.click:clone()
+        click:play()
+    end 
+    
+
+    -- add active modifier
+    if toggleState then
+        table.insert(activeModifiers, {id = buttonId, type = "mult", value = 2})
+    else
+        for i, modifier in ipairs(activeModifiers) do
+            if modifier.id == buttonId then
+                table.remove(activeModifiers, i)
+                break
             end
+        end
+    end
 
-            -- Update world position with velocity
-            self.worldX = self.worldX + self.vx * dt
-            self.worldY = self.worldY + self.vy * dt
 
-            -- Update rotation based on mouse position or autoaim
-            local centerX = self.x + self.width / 2 -- center x position of player
-            local centerY = self.y + self.height / 2 -- center y position of player
+    if showHitText == true then
+        for i, key in ipairs(keys) do
+            if key.id == buttonId then
+                -- set pressed state to true
+                table.insert(modifierHitTexts.texts, {time = 0, count=count, color=Utils.color(randomHexColor()), text = "x2", x = key.x + math.random(key.width*key.scaleX-20), y = key.y})
+                break
+            end
+        end
+    end
+end
 
-            if self.autoaim then
-                local nearestEnemy = nil
-                local nearestDistance = math.huge
-                for _, enemy in ipairs(enemies) do
-                    local distance = math.sqrt((enemy.x - self.worldX)^2 + (enemy.y - self.worldY)^2)
-                    if distance < nearestDistance then
-                        nearestDistance = distance
-                        nearestEnemy = enemy
+function randomHexColor()
+    return string.format("#%06X", love.math.random(0, 0xFFFFFF))
+end
+
+function echo(buttonId, toggleState, showHitText, count)
+    local click = sounds.click:clone()
+    click:play()
+    
+     -- add active modifier
+    if toggleState then
+        table.insert(activeModifiers, {id = buttonId, type = "echo"})
+    else
+        for i, modifier in ipairs(activeModifiers) do
+            if modifier.id == buttonId then
+                table.remove(activeModifiers, i)
+                break
+            end
+        end
+    end
+
+    if showHitText == true then
+        for i, key in ipairs(keys) do
+            if key.id == buttonId then
+                -- set pressed state to true
+                local hitText = ""
+                if modifierTimelineManager.lastModifier then
+                    hitText = modifierTimelineManager.lastModifier.type
+                else
+                    hitText = "none"
+                end
+                table.insert(modifierHitTexts.texts, {time = 0, count=count, color=Utils.color(randomHexColor()), text = hitText, x = key.x + math.random(key.width*key.scaleX-20), y = key.y})
+                break
+            end
+        end
+    end
+end
+
+function dice(buttonId, toggleState, showHitText, count)
+    local click = sounds.click:clone()
+    click:play()
+
+    local value = math.random(1, 6)
+    
+     -- add active modifier
+    if toggleState then
+        table.insert(activeModifiers, {id = buttonId, type = "dice", value = value})
+    else
+        for i, modifier in ipairs(activeModifiers) do
+            if modifier.id == buttonId then
+                table.remove(activeModifiers, i)
+                break
+            end
+        end
+    end
+
+    if showHitText == true then
+        for i, key in ipairs(keys) do
+            if key.id == buttonId then
+                -- set pressed state to true
+                table.insert(modifierHitTexts.texts, {time = 0, count=count, color=Utils.color(randomHexColor()), text = "+" .. value, x = key.x + math.random(key.width*key.scaleX-20), y = key.y})
+                break
+            end
+        end
+    end
+end
+
+function roundEnd()
+    inRound = false
+    -- reset points and goal
+    soundManager.moneySoundTimer = 0
+    soundManager.moneySoundCount = 4 + math.floor(game.round * 1.5) + math.floor(game.money/5)
+    game.round = game.round + 1
+
+    local win = sounds.win:clone()
+    win:setPitch(1.5)
+    win:play()
+end
+
+--============  LOVE Hooks  ============--
+
+function getNewKeyPos()
+    local numKeys = #keys - 1
+    local rowSize = 3
+    local row = math.floor(numKeys / rowSize)
+    local col = numKeys % rowSize
+    local x = love.graphics.getWidth()/2 - 116 + 88*col
+    local y = love.graphics.getHeight()/2 + 30 + 88*(row+1)
+    return x, y
+end
+
+function love.load()
+    -- Set up the window
+    love.window.setMode(2400, 1200, {resizable = false})
+    love.window.setTitle("Keys")
+    love.graphics.setBackgroundColor(Utils.color("#c0cfbe"))
+    love.graphics.setFont(fonts.p2p)
+
+    -- play music at 3/4 speed
+    sounds.music:setLooping(true)
+    sounds.music:setPitch(.5)
+    sounds.music:setVolume(0.3) 
+    sounds.music:play()
+
+
+    
+
+    -- table.insert(keys, UIButton:new("sprites/buy-button.png", love.graphics.getWidth()/2 - 60, love.graphics.getHeight()/2 - 23, 60, 23, 2, 2, false, nil, fonts.p2psmall, function() 
+    --     local s = sounds.click:clone()
+    --     local m = sounds.point:clone()
+    --     -- set random pitch on click
+    --     s:setPitch(math.random(9.5, 10.5) / 10)
+    --     m:setVolume(0.5)
+    --     s:play()
+    --     m:play()
+    --     game.points = game.points + 1
+    -- end))
+
+    -- insert hit button
+    table.insert(keys, UIButton:new("sprites/sell-button-clear.png", love.graphics.getWidth()/2 - 85, love.graphics.getHeight()/2 - 23 , 60, 23, 3, 3, false, "HIT", fonts.p2psmall, hit))
+
+    -- insert shop items
+    table.insert(shopManager.items, ShopItem:new(UIButton:new("sprites/mult-button.png", love.graphics.getWidth()/2 - 260, 135 , 22, 23, 3, 3, false, "x2", fonts.p2psmall, function() 
+        local click = sounds.click:clone()
+        local money = sounds.money2:clone()
+        money:setVolume(0.35)
+        money:play()
+        click:play()  
+        local xpos, ypos = getNewKeyPos()
+        table.insert(keys, UIButton:new("sprites/mult-button.png", xpos, ypos , 22, 23, 3, 3, false, "x2", fonts.p2psmall, mult, true))
+    end), "X2", "Doubles your points", 5))
+    table.insert(shopManager.items, ShopItem:new(UIButton:new("sprites/echo-button.png", love.graphics.getWidth()/2 - 40, 135 , 22, 23, 3, 3, false, "", fonts.p2psmall, function() 
+        local click = sounds.click:clone()
+        local money = sounds.money2:clone()
+        money:setVolume(0.35)
+        click:play()
+        money:play()
+        local xpos, ypos = getNewKeyPos()
+        table.insert(keys, UIButton:new("sprites/echo-button.png", xpos, ypos , 22, 23, 3, 3, false, "", fonts.p2psmall, echo, true))
+    end), "Echo", "Retrigger last pressed key", 8))
+    table.insert(shopManager.items, ShopItem:new(UIButton:new("sprites/dice-button.png", love.graphics.getWidth()/2 + 180, 135 , 22, 23, 3, 3, false, "", fonts.p2psmall, function() 
+        local click = sounds.click:clone()
+        local money = sounds.money2:clone()
+        money:setVolume(0.35)
+        click:play()
+        money:play()
+        local xpos, ypos = getNewKeyPos()
+        table.insert(keys, UIButton:new("sprites/dice-button.png", xpos, ypos, 22, 23, 3, 3, false, "", fonts.p2psmall, dice, true))
+    end), "Dice", "Roll a dice and add the value", 4))
+
+
+
+    -- insert ui keys
+
+
+    -- next round button
+    table.insert(uikeys, UIButton:new("sprites/sell-button-clear.png", love.graphics.getWidth()/2 - 600, 200, 60, 23, 3, 3, false, "NEXT", fonts.p2psmall, function()
+        local click = sounds.click:clone() 
+        click:play()
+        inRound = true
+        inShop = false
+    end))
+end
+
+function love.update(dt)
+    -- Add this line near the top
+    camera:update(dt)
+
+    -- update text modifier hit texts
+    modifierHitTexts:update(dt)
+
+
+    -- Update keys
+    for _, key in ipairs(keys) do
+        key:update()
+    end
+
+    -- Update ui keys
+    if inShop then
+        for _, key in ipairs(uikeys) do
+            key:update()
+        end
+    end
+
+    -- update cursor if anyone is in a hover state
+    
+    local hover = false
+    if not isGameOver then
+        for _, key in ipairs(keys) do
+            if key.hover then
+                love.mouse.setCursor(love.mouse.getSystemCursor("hand"))
+                hover = true
+                break
+            end
+        end
+        for _, items in ipairs(shopManager.items) do
+            if items.button.hover then
+                love.mouse.setCursor(love.mouse.getSystemCursor("hand"))
+                hover = true
+                break
+            end
+        end
+        for _, key in ipairs(uikeys) do
+            if key.hover then
+                love.mouse.setCursor(love.mouse.getSystemCursor("hand"))
+                hover = true
+                break
+            end
+        end
+    end
+    
+    
+    if not hover then
+        love.mouse.setCursor()
+    end
+
+    -- update modifier timeline manager
+    modifierTimelineManager:update(dt)
+
+    -- Handle money sound sequence
+    if soundManager.moneySoundCount > 0 then
+        soundManager.moneySoundTimer = soundManager.moneySoundTimer + dt
+        if soundManager.moneySoundTimer >= soundManager.moneySoundInterval then  -- 0.1 seconds between sounds
+            local s = sounds.money:clone()
+            s:setPitch(math.random(9, 11) / 10)
+            s:setVolume(0.35)
+            s:play()
+            game.money = game.money + 1
+            soundManager.moneySoundCount = soundManager.moneySoundCount - 1
+
+            table.insert(modifierHitTexts.texts, {time = 0, count=1, color=Utils.color("#d1b70f"), text = "$", x = love.graphics.getWidth()/2 - 550 +  math.random(80), y = 80})
+            soundManager.moneySoundTimer = 0
+        end
+    end
+
+    -- handle shop animation
+    if inShop and shopManager.animation then
+        shopManager.animation:update(dt)
+    end
+
+    -- Handle scene transition
+    if not inRound and not inShop then
+        shopManager.timeElapsed = shopManager.timeElapsed + dt
+        if shopManager.timeElapsed >= shopManager.sceneTransitionTime then
+            shopManager.timeElapsed = 0
+            shopManager.animation = Animation:new("sprites/shop.png", 4, love.graphics.getWidth() / 2 -( 256 * 3 / 2) , 100, 256, 64, 3, 3, .2)
+            
+            game.goal = math.floor(game.goal * 2)
+            game.clicks = game.startingClicks
+            game.points = 0
+            inShop = true
+        end
+    end
+
+    -- handle animation buttons
+    if inShop and shopManager.animation then
+        for _, item in ipairs(shopManager.items) do
+            item:update(dt)
+        end
+    end
+end
+
+function addCommasToNumber(number)
+    -- Convert number to string
+    local numStr = tostring(number)
+    
+    -- Split into integer and decimal parts (if any)
+    local integerPart, decimalPart = numStr:match("^([^%.]*)(%.?.*)$")
+    
+    -- Add commas to integer part
+    local formatted = ""
+    local len = #integerPart
+    for i = 1, len do
+        local char = integerPart:sub(i, i)
+        formatted = formatted .. char
+        -- Add comma if we're not at the end and it's 3 digits from the right
+        if (len - i) % 3 == 0 and i < len then
+            formatted = formatted .. ","
+        end
+    end
+
+    return formatted
+end
+
+function love.draw()
+    love.graphics.push()
+    love.graphics.translate(-camera.x, -camera.y)
+
+    -- temp game over screen
+    if isGameOver then
+        love.graphics.setFont(fonts.p2pmedium)
+        local font = love.graphics.getFont()
+        local text = "Game Over"
+        local textWidth = font:getWidth(text)
+        love.graphics.setColor(0,0,0,1)
+        love.graphics.print(text, love.graphics.getWidth() / 2 - textWidth / 2, love.graphics.getHeight() / 2 - 100)
+        -- End camera transform
+        love.graphics.pop()
+        return
+    end
+
+    -- draw keypad sprite
+    love.graphics.setColor(1, 1, 1, 1)
+    local sprite = love.graphics.newImage("sprites/keypad.png")
+    sprite:setFilter("nearest", "nearest")
+    love.graphics.draw(sprite, love.graphics.getWidth()/2 - 141 , love.graphics.getHeight()/2 + 108, 0, 3, 3)
+
+
+    -- Draw keys
+    for _, key in ipairs(keys) do
+        key:draw()
+    end
+
+    -- draw modifier hit texts
+    modifierHitTexts:draw()
+
+    -- draw money on the left
+    local font = love.graphics.getFont()
+    local screenWidth = love.graphics.getWidth()
+    local x = screenWidth / 2
+    local y = 100
+    local textShadowOffset = 4
+
+    local moneyText = tostring(game.money)
+    local moneyTextWidth = font:getWidth(moneyText)
+    love.graphics.setColor(0,0,0,.8)
+    love.graphics.print("$" .. moneyText, x - 500 - moneyTextWidth - textShadowOffset, y - textShadowOffset)
+    love.graphics.setColor(Utils.color("#d1b70f"))
+    love.graphics.print("$" .. moneyText, x - 500 - moneyTextWidth, y)
+    love.graphics.setColor(1,1,1)
+
+    -- draw ui keys if in shop
+    if inShop then
+        for _, key in ipairs(uikeys) do
+            key:draw()
+        end
+    end
+
+
+    -- draw animation
+    if inShop and shopManager.animation then
+        shopManager.animation:draw()
+        for _, item in ipairs(shopManager.items) do
+            item:draw()
+        end
+        -- End camera transform
+        love.graphics.pop()
+        return
+    end
+
+    -- Draw points
+    
+    love.graphics.setFont(fonts.p2plarge)
+    local font = love.graphics.getFont()
+    local text = tostring(addCommasToNumber(game.points))
+    local textWidth = font:getWidth(text)
+    love.graphics.setColor(0,0,0,.8)
+    love.graphics.print(text, screenWidth / 2 - textWidth / 2, 300)
+    love.graphics.setColor(1,1,1,1)
+    love.graphics.print(text, screenWidth / 2 - textWidth / 2 + textShadowOffset, 300 + textShadowOffset)
+
+    -- Draw round points
+    if game.roundPoints > 0 then
+        love.graphics.push()
+        love.graphics.translate(-camera.x*0.5, -camera.y*0.5)
+        local screenWidth = love.graphics.getWidth()
+        love.graphics.setFont(fonts.p2pmedium)
+        local font = love.graphics.getFont()
+        local text = tostring("+" .. addCommasToNumber(game.roundPoints))
+        local textWidth = font:getWidth(text)
+        love.graphics.setColor(0,0,0,.8)
+        love.graphics.print(text, screenWidth / 2 - textWidth / 2, 380)
+        love.graphics.setColor(Utils.color("#ff6a3d"))
+        love.graphics.print(text, screenWidth / 2 - textWidth / 2 + textShadowOffset, 390 + textShadowOffset)
+        love.graphics.pop()
+    end
+
+    -- Draw goal text
+    
+    -- Get to: portion
+    love.graphics.setFont(fonts.p2pmediumsmall)
+    local font = love.graphics.getFont()
+    local goalBaseText = "Get to:"
+    local baseTextWidth = font:getWidth(goalBaseText)
+    love.graphics.setColor(0, 0, 0, .5)
+    love.graphics.print(goalBaseText, x - baseTextWidth / 2, y)
+
+    -- Target
+    love.graphics.setFont(fonts.p2pmedium)
+    font = love.graphics.getFont()
+    local goalText = tostring(game.goal)
+    local goalTextWidth = font:getWidth(goalText)
+    love.graphics.setColor(0,0,0,.8)
+    love.graphics.print(goalText, x - goalTextWidth / 2, y + 50)
+    love.graphics.setColor(Utils.color("#5162ad"))
+    love.graphics.print(goalText, x - goalTextWidth / 2 + textShadowOffset, y + 50 + textShadowOffset)
+    
+    -- Draw remaining clicks
+    love.graphics.setFont(fonts.p2p)
+    font = love.graphics.getFont()
+    local clicksText = tostring(game.clicks)
+    local clicksTextWidth = font:getWidth(clicksText)
+    love.graphics.setColor(1, 1, 1, .5)
+    love.graphics.print(clicksText, x  + 500 - clicksTextWidth - textShadowOffset, y - textShadowOffset)
+    love.graphics.setColor(Utils.color("#eb3e38"))
+    love.graphics.print(clicksText, x  + 500 - clicksTextWidth, y)
+
+    love.graphics.setFont(fonts.p2pmedium)
+    love.graphics.setColor(1, 1, 1, .5)
+    love.graphics.print("/" .. game.startingClicks, x  + 500 - textShadowOffset, y + 30 - textShadowOffset)
+    love.graphics.setColor(Utils.color("#eb3e38"))
+    love.graphics.print("/" .. game.startingClicks, x  + 500, y + 30)
+
+    love.graphics.setColor(1, 1, 1, 1) -- Reset color to white
+
+    love.graphics.setFont(fonts.p2p)
+
+    
+    -- End camera transform
+    love.graphics.pop()
+end
+
+function love.mousepressed(x, y, button)
+    if button == 1 then
+        -- Check if any key is clicked
+        -- combine keys and animation buttons in one table
+        if inRound and not modifierTimelineManager.active then
+            for _, key in ipairs(keys) do
+                if key.hover then
+                    key.hot = true
+                    if key.triggerOnClick then
+                        key.callback()
                     end
                 end
-                if nearestEnemy then
-                    local enemyScreenX = nearestEnemy.x - camera.x + camera.shakeX
-                    local enemyScreenY = nearestEnemy.y - camera.y + camera.shakeY
-                    local dx = (enemyScreenX + nearestEnemy.width / 2) - centerX
-                    local dy = (enemyScreenY + nearestEnemy.height / 2) - centerY
-                    self.radians = math.atan2(dy, dx)
-                end
-            else
-                local mx, my = love.mouse.getPosition()
-                self.radians = math.atan2(my - centerY, mx - centerX)
-            end
-
-            -- update gun tip position
-            self.gunTipX = centerX + math.cos(self.radians) * 52
-            self.gunTipY = centerY + math.sin(self.radians) * 52
-
-            -- movement from force
-            if self.fx ~= 0 or self.fy ~= 0 then
-                -- apply force
-                self.worldX = self.worldX + self.fx * dt
-                self.worldY = self.worldY + self.fy * dt
-                self.fx = self.fx * 0.9
-                self.fy = self.fy * 0.9
-                -- apply friction
-                if math.abs(self.fx) < 0.1 then 
-                    self.fx = 0 
-                end
-                if math.abs(self.fy) < 0.1 then 
-                    self.fy = 0 
-                end
-            end
-
-            -- update gun shake quickly WITHOUT USING DECAY
-            if self.gunShake.duration > 0 then
-                self.gunShake.x = math.random(-1, 1) * 3
-                self.gunShake.y = math.random(-1, 1) * 3
-                self.gunShake.duration = self.gunShake.duration - love.timer.getDelta()
-            else
-                self.gunShake.x = 0
-                self.gunShake.y = 0
-            end
-
-            -- if mouse is down then fire but make sure to limit it by a firerate
-            if love.mouse.isDown(1) then
-                if self.fireTime > self.fireRate then
-                    self.fire(self);
-                    self.fireTime = 0
-                end
-            end
-            if self.fireTime < self.fireRate then
-                self.fireTime = self.fireTime + dt
-            end
-
-            if self.particleSystem then
-                self.particleSystem:update(dt)  -- Update particles
-            end
-        end,
-        -- Initialize the particle system
-        initializeParticles = function(self)
-            local image = love.graphics.newImage("sprites/particle.png")  -- Use a small spark image for the particles
-            self.particleSystem = love.graphics.newParticleSystem(image, 100)
-
-            self.particleSystem:setEmissionRate(0)  -- Start with no emission
-            self.particleSystem:setParticleLifetime(0.05, 0.07)  -- Lifetime of each particle
-            self.particleSystem:setSpeed(300, 500)  -- Speed range of the particles
-            self.particleSystem:setSizeVariation(1)  -- Particles can vary in size
-            self.particleSystem:setSizes(0.5, 1)  -- Initial size range of the particles
-            self.particleSystem:setSpin(0, math.pi)  -- Particles can rotate
-            self.particleSystem:setColors(1, 0.7, 0.2, 1, 1, 1, 1, 1)  -- Particle color (orange/yellow)
-            self.particleSystem:setDirection(self.radians)  -- Particles are emitted in all directions
-            self.particleSystem:setSpread(math.pi/2)
-            self.particleSystem:setRadialAcceleration(5000)  -- Particles have an outward push
-        end,
-    }
-
-    if game.sound_enabled then
-        love.audio.setVolume(0.5)
-    else
-        love.audio.setVolume(0)
-    end
-
-
-    love.graphics.setBackgroundColor(colors.blue)
-    love.graphics.setFont(fonts.poppins)
-
-    player:initializeParticles()
-
-    if game.music_enabled then
-        sounds.menu:setLooping(true)
-        sounds.menu:play()
-    end
-end
-
--- UPDATE
-function love.update(dt)
-    -- Game scene
-    if game.scene == "game" then
-        -- Update player position
-        player:update(dt)
-
-        -- Update camera position
-        camera.x = player.worldX - love.graphics.getWidth() / 2
-        camera.y = player.worldY - love.graphics.getHeight() / 2
-
-        -- Update camera
-        updateCameraShake(dt)
-
-        -- Send local player position
-        local data = string.format("%f,%f,%.6f", player.worldX, player.worldY, player.radians)
-        server:send(data)
-
-        --  Update enemies
-        updateEnemies(dt)
-
-        -- spawn enemies randomly
-        if math.random() < 0.01 then
-            local spawnRadius = 600  -- Spawn off-screen
-            local angle = math.random() * 2 * math.pi
-            local x = player.worldX + math.cos(angle) * spawnRadius
-            local y = player.worldY + math.sin(angle) * spawnRadius
-            spawnEnemy(x, y, player)
-            table.insert(globalAnimations, SpriteAnimation:new("sprites/smoke.png", 32, 32, 2, 2, true, x, y, {
-                idle = {1, 8, 0.07}
-            }))
-        end
-
-        -- update global animations
-        for i, anim in ipairs(globalAnimations) do
-            anim:update(dt)
-            if anim.state == "destroyed" then
-                table.remove(globalAnimations, i)
             end
         end
-    
-        -- Process network events
-        local event = host:service(100)
-        while event do
-            if event.type == "receive" then
-                local id, x, y, radians = event.data:match("([^,]+),([%-?%d%.]+),([%-?%d%.]+),([%-?%d%.]+)")
-                if id and x and y and radians then
-                    players[id] = { worldX = tonumber(x), worldY = tonumber(y), radians = tonumber(radians) }
+
+        if inShop and not modifierTimelineManager.active then
+            for _, key in ipairs(uikeys) do
+                if key.hover then
+                    key.hot = true
+                    if key.triggerOnClick then
+                        key.callback()
+                    end
                 end
-            elseif event.type == "connect" then
-                print(event.peer, "connected.")
-                playerID = tostring(event.peer:connect_id())
-            elseif event.type == "disconnect" then
-                print(event.peer, "disconnected.")
-                players[playerID] = nil
             end
-            event = host:service()
         end
-    end
-end
 
--- DRAW 
-function love.draw()
-    -- set default attributes
-    love.mouse.setCursor()
-
-    -- Render current scene
-    if scenes[game.scene] then
-        scenes[game.scene]()
-    else
-        drawNotFoundScene()
-    end
-end
-
--- QUIT
-function love.quit()
-    love.graphics.setShader()  -- reset shader before quitting
-end
-
---============  LOVE HOOKS - Event Handlers  ============--
-
--- handle mouse events - only register click if mouse is both pressed and released within a button's area
-
--- MOUSE PRESSED
-function love.mousepressed(x, y, button)
-    if game.scene == "menu" then
-        for _, obj in ipairs(uiobjects) do
-            if button == 1 and x > obj.x and x < obj.x + obj.width and
-               y > obj.y and y < obj.y + obj.height then
-                obj.hot = true
+        -- same for anim buttons
+        if inShop and shopManager.animation then
+            for _, item in ipairs(shopManager.items) do
+                if item.button.hover then
+                    item.button.hot = true
+                    if item.button.triggerOnClick then
+                        item.button.callback()
+                    end
+                end
             end
         end
     end
 end
 
--- MOUSE RELEASED
 function love.mousereleased(x, y, button)
-    if game.scene == "menu" then
-        for _, obj in ipairs(uiobjects) do
-            if obj.hot and button == 1 and x > obj.x and x < obj.x + obj.width and
-            y > obj.y and y < obj.y + obj.height then
-                local s = sounds.click:clone()
-                s:play()
-
-                local s = sounds.money:clone()
-                s:setVolume(0.5)
-                s:play()
-                obj.callback()
-            end
-            if obj.hot then
-                obj.hot = false
+    if button == 1 then
+        -- Reset clicked state
+        if inRound then
+            for _, key in ipairs(keys) do
+                if not key.triggerOnClick and key.hot and key.hover then
+                    key.callback()
+                end
+                key.hot = false
             end
         end
-    end
-end
 
-function love.keypressed(key)
-    if key == "b" then
-        player.debugMode = not player.debugMode  -- Toggle debug mode
-    end
-end
-
---============  Scene Helpers  ============--
-
--- Change scene
-function changeScene(newScene)
-    -- set new scene
-    game.scene = newScene
-
-    -- play new scene sound
-    if game.music_enabled then
-        if game.scene == "menu" then
-            sounds.menu:stop()
-            sounds.game:play()
-        elseif game.scene == "game" then
-            sounds.game:stop()
-            sounds.menu:play()
+        if inShop then
+            for _, key in ipairs(uikeys) do
+                if not key.triggerOnClick and key.hot and key.hover then
+                    key.callback()
+                end
+                key.hot = false
+            end
         end
-    end 
-end
-
---============  Scenes  ============--
-
--- Draw menu scene
-function drawMenuScene()
-    for _, obj in ipairs(uiobjects) do
-        obj:draw()
-    end
-end
-
--- Draw game scene
-function drawGameScene()
-    love.graphics.push()
-
-    -- Translate for camera shake
-    love.graphics.translate(-camera.x + camera.shakeX, -camera.y + camera.shakeY)
-
-    -- Draw tiled background
-    love.graphics.setColor(background.bgColor)  -- Set background color
-    love.graphics.rectangle("fill", camera.x - camera.shakeX, camera.y - camera.shakeY, love.graphics.getWidth(), love.graphics.getHeight())  -- Fill screen
-
-    love.graphics.setColor(background.gridColor)  -- Set grid color
-    local startX = math.floor(camera.x / background.tileSize) * background.tileSize  -- Align to grid
-    local startY = math.floor(camera.y / background.tileSize) * background.tileSize  -- Align to grid
-    local endX = startX + love.graphics.getWidth() + background.tileSize
-    local endY = startY + love.graphics.getHeight() + background.tileSize
-
-    -- Draw vertical lines
-    for x = startX, endX, background.tileSize do
-        love.graphics.line(x, startY, x, endY)
-    end
-    -- Draw horizontal lines
-    for y = startY, endY, background.tileSize do
-        love.graphics.line(startX, y, endX, y)
-    end
-
-    -- draw enemies
-    drawEnemies()
-
-    -- Draw other players
-    love.graphics.setColor(.5, 0, 0)
-    for id, p in pairs(players) do
-        if id ~= playerID then
-            love.graphics.setColor(.6, .6, 1) -- blue-shift for other players
-            sprites.player:setFilter("nearest", "nearest")
-            love.graphics.draw(sprites.player, p.worldX, p.worldY, p.radians - math.pi / 2 , 2, 2, sprites.player:getWidth()/2, sprites.player:getHeight()/2)
+        
+        -- same for animation buttons
+        if inShop and shopManager.animation then
+            for _, item in ipairs(shopManager.items) do
+                if item.button.hot and item.button.hover then
+                    item.button.callback()
+                end
+                item.button.hot = false
+            end
         end
     end
-    love.graphics.setColor(1, 1, 1, 1)
-
-
-    -- draw global animations
-    love.graphics.setColor(1, 1, 1, .7)
-    for _, anim in ipairs(globalAnimations) do
-        anim:draw(0, 0)
-    end
-    love.graphics.setColor(1, 1, 1, 1)
-   
-    -- Draw player (fixed at screen center, translated back)
-    love.graphics.push()
-    love.graphics.translate(camera.x - camera.shakeX, camera.y - camera.shakeY)  -- Undo camera for player
-    player:draw()
-    love.graphics.pop()
-
-    love.graphics.pop()
-end
-
--- Draw null scene
-function drawNotFoundScene()
-    love.graphics.setColor(1, 0, 0)
-    love.graphics.print("Scene not found", love.graphics.getWidth() / 2, love.graphics.getHeight() / 2, 0, 1, 1, 0, 0)
 end
